@@ -1061,15 +1061,25 @@ class Control:
             if isinstance(value, (int, float, str)):
                 uniform_values[attribute_id] = value
 
+        # Whatever isn't resolved as document-uniform (either never marked as such, or marked
+        # but the value turned out mixed) is looked up per-word -- but batched into a single
+        # `GetAttributeValues` COM call per word instead of one `GetAttributeValue` call per
+        # attribute per word.
+        per_word_ids = [attribute_id for attribute_id in attribute_ids if attribute_id not in uniform_values]
+
         results: List[Tuple[str, List[Rect], Dict[int, Any]]] = []
         for text, wordRange in self._iter_word_ranges(textPattern):
             rects = wordRange.GetBoundingRectangles()
-            attrs: Dict[int, Any] = {}
-            for attribute_id in attribute_ids:
-                if attribute_id in uniform_values:
-                    attrs[attribute_id] = uniform_values[attribute_id]
+            attrs: Dict[int, Any] = dict(uniform_values)
+            if per_word_ids:
+                batched = wordRange.GetAttributeValues(per_word_ids)
+                if batched is not None:
+                    attrs.update(zip(per_word_ids, batched))
                 else:
-                    attrs[attribute_id] = wordRange.GetAttributeValue(attribute_id)
+                    # Provider doesn't implement IUIAutomationTextRange3 -- fall back to one
+                    # GetAttributeValue call per attribute.
+                    for attribute_id in per_word_ids:
+                        attrs[attribute_id] = wordRange.GetAttributeValue(attribute_id)
             results.append((text, rects, attrs))
         return results
 

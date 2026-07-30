@@ -2624,6 +2624,61 @@ def RemoveAllEventHandlers() -> None:
     _AutomationClient.instance().IUIAutomation.RemoveAllEventHandlers()
 
 
+_automation3_instance = None
+
+
+def _get_automation3():
+    """
+    Get an `IUIAutomation3` object, for the TextEdit-changed handlers below.
+
+    Naively QueryInterface-ing the shared `_AutomationClient.instance().IUIAutomation`
+    singleton up to `IUIAutomation3` does NOT work -- verified live: that singleton is created
+    from the `CUIAutomation` coclass (CLSID `{ff48dba4-...}`), which only ever implements
+    plain `IUIAutomation`; `QueryInterface(IUIAutomation2/3/.../6)` on it fails with
+    E_NOINTERFACE regardless of Windows version. The whole newer interface ladder
+    (IUIAutomation2 through IUIAutomation6) is only reachable through the separate
+    `CUIAutomation8` coclass, so this creates and caches its own independent COM object from
+    that coclass instead of trying to upgrade the existing one.
+    """
+    global _automation3_instance
+    if _automation3_instance is None:
+        _automation3_instance = comtypes.client.CreateObject(
+            _AutomationClient.instance().UIAutomationCore.CUIAutomation8,
+            interface=_AutomationClient.instance().UIAutomationCore.IUIAutomation3,
+        )
+    return _automation3_instance
+
+
+def AddTextEditTextChangedEventHandler(
+    element, scope: int, textEditChangeType: int, cacheRequest, handler
+) -> None:
+    """
+    Registers a method that handles UI Automation TextEdit text-changed events -- fired when a
+    control's text changes via IME composition or autocorrect/autocomplete, as opposed to the
+    plain `UIA_Text_TextChangedEventId` which covers ordinary edits.
+    Call IUIAutomation3::AddTextEditTextChangedEventHandler.
+
+    element: the root element to watch (native COM element, e.g. `control.Element`).
+    scope: int, a value in class `TreeScope`.
+    textEditChangeType: int, a value in class `TextEditChangeType`.
+    cacheRequest: a native `IUIAutomationCacheRequest` pointer, or None.
+    handler: `comtypes.COMObject` implementing `IUIAutomationTextEditTextChangedEventHandler`
+        (see `events.TextEditTextChangedEventHandler`).
+    Refer https://learn.microsoft.com/en-us/windows/win32/api/uiautomationcore/nf-uiautomationcore-iuiautomation3-addtexteditwexchangedeventhandler
+    """
+    _get_automation3().AddTextEditTextChangedEventHandler(
+        element, scope, textEditChangeType, cacheRequest, handler
+    )
+
+
+def RemoveTextEditTextChangedEventHandler(element, handler) -> None:
+    """
+    Removes the specified TextEdit text-changed event handler.
+    Call IUIAutomation3::RemoveTextEditTextChangedEventHandler.
+    """
+    _get_automation3().RemoveTextEditTextChangedEventHandler(element, handler)
+
+
 # Condition creation helper functions
 
 
