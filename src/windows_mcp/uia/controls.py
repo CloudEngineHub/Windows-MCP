@@ -26,7 +26,7 @@ from _ctypes import COMError
 from typing import Any, Callable, Dict, Generator, List, Tuple
 from .enums import *
 from .core import *
-from .core import _AutomationClient
+from .core import _AutomationClient, _get_system_dpi
 from .patterns import *
 from .exceptions import from_com_error, UIAException
 
@@ -973,28 +973,56 @@ class Control:
         value = wordRange.GetAttributeValue(TextAttributeId.FontSizeAttribute)
         return float(value) if isinstance(value, (int, float)) else None
 
-    def GetAllWordBoundingBoxes(self) -> List[Rect] | None:
+    def GetAllWordBoundingBoxes(self) -> List[Tuple[str, List[Rect]]] | None:
         """
-        Return the bounding box of every word in the control's visible text (via `TextPattern`).
-        Return List[Rect] or None if the control has no `TextPattern`.
+        Return (word, bounding boxes) for every word in the control's visible text (via `TextPattern`).
+        Return List[Tuple[str, List[Rect]]] or None if the control has no `TextPattern`.
             Walks each visible range word-by-word using `TextRange.Move(TextUnit.Word, 1)`.
+            Bounding boxes is usually a single `Rect`; more than one if the word wraps across lines.
+            Boxes are vertically shrunk to the glyph's font-size (in place of the raw
+            line-height rect `GetBoundingRectangles` returns) when the font size attribute
+            is available; otherwise the untouched line-height rect is kept.
         """
         textPattern = self.GetPattern(PatternId.TextPattern)
         if textPattern is None:
             return None
-        rects: List[Rect] = []
+        dpi = _get_system_dpi() or 96
+        words: List[Tuple[str, List[Rect]]] = []
         for visibleRange in textPattern.GetVisibleRanges():
             wordRange = visibleRange.Clone()
             wordRange.ExpandToEnclosingUnit(TextUnit.Word)
             while wordRange.CompareEndpoints(
                 TextPatternRangeEndpoint.Start, visibleRange, TextPatternRangeEndpoint.End
             ) < 0:
-                if wordRange.GetText(-1).strip():
-                    rects.extend(wordRange.GetBoundingRectangles())
+                text = wordRange.GetText(-1).strip()
+                if text:
+                    rects = wordRange.GetBoundingRectangles()
+                    font_size = wordRange.GetAttributeValue(TextAttributeId.FontSizeAttribute)
+                    if isinstance(font_size, (int, float)):
+                        rects = [self._shrink_rect_to_font_size(rect, font_size, dpi) for rect in rects]
+                    words.append((text, rects))
                 moved = wordRange.Move(TextUnit.Word, 1)
                 if moved == 0:
                     break
-        return rects
+        return words
+
+    @staticmethod
+    def _shrink_rect_to_font_size(rect: Rect, font_size_pt: float, dpi: int) -> Rect:
+        """
+        Shrink `rect`'s height to the pixel height implied by `font_size_pt` (points), anchored
+        to the rect's bottom edge. `GetBoundingRectangles` reports the control's full line-height
+        box, which is noticeably taller than the glyphs themselves; the bottom edge tracks the
+        line's baseline/descent closely, while the extra leading is padded above it.
+        """
+        font_px = font_size_pt * dpi / 72.0
+        if font_px <= 0 or font_px >= rect.height():
+            return rect
+        return Rect(
+            left=rect.left,
+            top=int(round(rect.bottom - font_px)),
+            right=rect.right,
+            bottom=rect.bottom,
+        )
 
     def GetPropertyValueEx(self, propertyId: int, ignoreDefaultValue: int) -> Any:
         """
