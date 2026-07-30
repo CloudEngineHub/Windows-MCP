@@ -987,21 +987,30 @@ class Control:
         if textPattern is None:
             return None
         dpi = _get_system_dpi() or 96
+        # Font size is virtually always uniform across a control — look it up once on the
+        # whole document instead of once per word (each TextRange COM call is expensive).
+        doc_font_size = textPattern.DocumentRange.GetAttributeValue(TextAttributeId.FontSizeAttribute)
+        uniform_font_size = doc_font_size if isinstance(doc_font_size, (int, float)) else None
         words: List[Tuple[str, List[Rect]]] = []
         for visibleRange in textPattern.GetVisibleRanges():
             wordRange = visibleRange.Clone()
-            wordRange.ExpandToEnclosingUnit(TextUnit.Word)
+            # waitTime=0: these are read-only navigation calls, not UI-mutating actions —
+            # the default 0.5s settling delay only makes sense for things like Click/Toggle.
+            wordRange.ExpandToEnclosingUnit(TextUnit.Word, waitTime=0)
             while wordRange.CompareEndpoints(
                 TextPatternRangeEndpoint.Start, visibleRange, TextPatternRangeEndpoint.End
             ) < 0:
                 text = wordRange.GetText(-1).strip()
                 if text:
                     rects = wordRange.GetBoundingRectangles()
-                    font_size = wordRange.GetAttributeValue(TextAttributeId.FontSizeAttribute)
-                    if isinstance(font_size, (int, float)):
+                    font_size = uniform_font_size
+                    if font_size is None:
+                        attr = wordRange.GetAttributeValue(TextAttributeId.FontSizeAttribute)
+                        font_size = attr if isinstance(attr, (int, float)) else None
+                    if font_size is not None:
                         rects = [self._shrink_rect_to_font_size(rect, font_size, dpi) for rect in rects]
                     words.append((text, rects))
-                moved = wordRange.Move(TextUnit.Word, 1)
+                moved = wordRange.Move(TextUnit.Word, 1, waitTime=0)
                 if moved == 0:
                     break
         return words

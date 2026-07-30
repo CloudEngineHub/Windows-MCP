@@ -551,7 +551,7 @@ class Tree:
                                 except Exception:
                                     pass
 
-                            if isinstance(node,(EditControl,DocumentControl)):
+                            if isinstance(node,(EditControl,DocumentControl,ImageControl)):
                                 is_password = False
                                 try:
                                     is_password = bool(node.CachedIsPassword)
@@ -560,26 +560,22 @@ class Tree:
                                 except Exception:
                                     pass
 
-                                # try:
-                                #     value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
-                                #     metadata['value']=value.strip() if value else '(empty)'
-                                #     if not is_password and not is_dom:
-                                #         words=node.GetAllWordBoundingBoxes()
-                                #         for word,boxes in words:
-                                #             for box in boxes:
-                                #                 word_elements.append((word,box))
-                                #                 print(word,box)
-                                # except Exception:
-                                #     pass
+                                try:
+                                    value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
+                                    metadata['value']=value.strip() if value else '(empty)'
+                                    if not is_password and not is_dom:
+                                        words=node.GetAllWordBoundingBoxes()
+                                        for word,boxes in words:
+                                            for box in boxes:
+                                                word_elements.append((word,box))
+                                                print(word,box)
+                                except Exception:
+                                    pass
 
                             if isinstance(node,ComboBoxControl):
                                 try:
                                     value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
                                     metadata['value']=value.strip() if value else '(empty)'
-                                    words=node.GetAllWordBoundingBoxes()
-                                    for word,boxes in words:
-                                        for box in boxes:
-                                            word_elements.append((word,box))
                                 except Exception:
                                     pass
                                 
@@ -623,17 +619,6 @@ class Tree:
                                         metadata['selection'] = selected_names
                                 except Exception:
                                     pass
-                                
-                                # try:
-                                #     value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
-                                #     metadata['value']=value.strip() if value else '(empty)'
-                                #     if not is_password:
-                                #         words=node.GetAllWordBoundingBoxes()
-                                #         for word,boxes in words:
-                                #             for box in boxes:
-                                #                 word_elements.append((word,box))
-                                # except Exception:
-                                #     pass
 
                             if isinstance(node, SliderControl):
                                 try:
