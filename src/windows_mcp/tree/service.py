@@ -1,7 +1,5 @@
 from __future__ import annotations
-
-from windows_mcp.uia import Control, ComboBoxControl, CheckBoxControl, EditControl, ButtonControl, SliderControl, ScrollPattern, WindowControl, Rect, ExpandCollapseState, ToggleState, PatternId, PropertyId, AccessibleRoleNames, TreeScope, ControlFromHandle, UIADeadElementError, from_com_error
-from _ctypes import COMError
+from windows_mcp.uia import Control, ComboBoxControl, DocumentControl, CheckBoxControl, EditControl, ButtonControl, SliderControl, ScrollPattern, WindowControl, ImageControl, Rect, ExpandCollapseState, ToggleState, PatternId, PropertyId, AccessibleRoleNames, TreeScope, ControlFromHandle, UIADeadElementError, from_com_error
 from windows_mcp.tree.config import INTERACTIVE_CONTROL_TYPE_NAMES, DOCUMENT_CONTROL_TYPE_NAMES, INFORMATIVE_CONTROL_TYPE_NAMES, DEFAULT_ACTIONS, INTERACTIVE_ROLES, THREAD_MAX_RETRIES, STRUCTURAL_CONTROL_TYPE_NAMES
 from windows_mcp.tree.views import TreeElementNode, ScrollElementNode, TextElementNode, Center, BoundingBox, TreeState, SemanticNode, _prune_structural, _reverse_children_order
 from windows_mcp.tree.cache_utils import CacheRequestFactory, CachedControlHelper
@@ -10,6 +8,7 @@ from windows_mcp.tree.utils import random_point_within_bounding_box
 from windows_mcp.tree import ia2 as ia2_traversal
 from typing import TYPE_CHECKING,Optional,Any
 from time import sleep,perf_counter
+from _ctypes import COMError
 import logging
 import weakref
 import os
@@ -246,6 +245,36 @@ class Tree:
                 height=clipped.height()
             )
         return BoundingBox(left=0, top=0, right=0, bottom=0, width=0, height=0)
+
+    def _append_word_nodes(self, word_elements:list[tuple[str,Rect]], reference_box:Rect, window_name:str,
+                            target_nodes:list[TreeElementNode], current_semantic_node:'Optional[SemanticNode]'=None):
+        """Append one interactive `TreeElementNode` (control_type='Word') per (word, rect) pair."""
+        for word, rect in word_elements:
+            if not self.element_budget.try_consume():
+                break
+            bounding_box = self.iou_bounding_box(reference_box, rect)
+            if bounding_box.width <= 0 or bounding_box.height <= 0:
+                continue
+            center = bounding_box.get_center()
+            word_node = TreeElementNode(**{
+                'name':word,
+                'control_type':'Word',
+                'bounding_box':bounding_box,
+                'center':center,
+                'window_name':window_name,
+                'metadata':{}
+            })
+            target_nodes.append(word_node)
+            if current_semantic_node is not None:
+                current_semantic_node.add_child(SemanticNode(
+                    control_type='Word',
+                    element_type='interactive',
+                    name=word,
+                    window_name=window_name,
+                    center=center,
+                    bounding_box=bounding_box,
+                    metadata={},
+                ))
 
 
 
@@ -484,6 +513,9 @@ class Tree:
 
                                 if is_role_interactive and (is_default_action or is_keyboard_focusable):
                                     is_interactive = True
+                                
+                        if isinstance(node,DocumentControl):
+                            is_interactive=True
 
                         if is_interactive:
                             is_focused = node.CachedHasKeyboardFocus
@@ -495,6 +527,8 @@ class Tree:
                             metadata['has_focused']=is_focused
                             if accelerator_key:
                                 metadata['shortcut']=accelerator_key
+
+                            word_elements: list[tuple[str, Rect]] = []
 
                             try:
                                 help_text = node.CachedHelpText
@@ -517,20 +551,38 @@ class Tree:
                                 except Exception:
                                     pass
 
-                            if isinstance(node,EditControl):
+                            if isinstance(node,(EditControl,DocumentControl)):
+                                is_password = False
                                 try:
-                                    value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
-                                    metadata['value']=value.strip() if value else '(empty)'
-                                except Exception:
-                                    pass
-
-                                try:
-                                    if node.CachedIsPassword:
+                                    is_password = bool(node.CachedIsPassword)
+                                    if is_password:
                                         metadata['is_password']=True
                                 except Exception:
                                     pass
 
+                                # try:
+                                #     value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
+                                #     metadata['value']=value.strip() if value else '(empty)'
+                                #     if not is_password and not is_dom:
+                                #         words=node.GetAllWordBoundingBoxes()
+                                #         for word,boxes in words:
+                                #             for box in boxes:
+                                #                 word_elements.append((word,box))
+                                #                 print(word,box)
+                                # except Exception:
+                                #     pass
+
                             if isinstance(node,ComboBoxControl):
+                                try:
+                                    value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
+                                    metadata['value']=value.strip() if value else '(empty)'
+                                    words=node.GetAllWordBoundingBoxes()
+                                    for word,boxes in words:
+                                        for box in boxes:
+                                            word_elements.append((word,box))
+                                except Exception:
+                                    pass
+                                
                                 try:
                                     control_state=node.GetCachedPropertyValue(PropertyId.ExpandCollapseExpandCollapseStateProperty)
                                     match control_state:
@@ -571,6 +623,17 @@ class Tree:
                                         metadata['selection'] = selected_names
                                 except Exception:
                                     pass
+                                
+                                # try:
+                                #     value = node.GetCachedPropertyValue(PropertyId.LegacyIAccessibleValueProperty)
+                                #     metadata['value']=value.strip() if value else '(empty)'
+                                #     if not is_password:
+                                #         words=node.GetAllWordBoundingBoxes()
+                                #         for word,boxes in words:
+                                #             for box in boxes:
+                                #                 word_elements.append((word,box))
+                                # except Exception:
+                                #     pass
 
                             if isinstance(node, SliderControl):
                                 try:
@@ -600,6 +663,7 @@ class Tree:
                                 self.element_budget.try_consume()
                                 dom_interactive_nodes.append(tree_node)
                                 self._dom_correction(node, dom_interactive_nodes, window_name)
+                                self._append_word_nodes(word_elements, self.dom_bounding_box, window_name, dom_interactive_nodes)
                             else:
                                 bounding_box=self.iou_bounding_box(window_bounding_box,element_bounding_box)
                                 center = bounding_box.get_center()
@@ -625,6 +689,7 @@ class Tree:
                                             metadata=dict(tree_node.metadata),
                                         ))
                                         semantic_added = True
+                                self._append_word_nodes(word_elements, window_bounding_box, window_name, interactive_nodes, current_semantic_node)
 
                     # Informative Check
                     if dom_informative_nodes is not None:
