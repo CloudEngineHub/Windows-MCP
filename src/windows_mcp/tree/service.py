@@ -1,5 +1,5 @@
 from __future__ import annotations
-from windows_mcp.uia import Control, ComboBoxControl, DocumentControl, CheckBoxControl, EditControl, ButtonControl, SliderControl, ScrollPattern, WindowControl, ImageControl, Rect, ExpandCollapseState, ToggleState, PatternId, PropertyId, AccessibleRoleNames, TreeScope, ControlFromHandle, UIADeadElementError, from_com_error
+from windows_mcp.uia import Control, ComboBoxControl, DocumentControl, CheckBoxControl, EditControl, ButtonControl, SliderControl, ScrollPattern, WindowControl, ImageControl, Rect, ExpandCollapseState, ToggleState, PatternId, PropertyId, AccessibleRoleNames, TreeScope, ControlFromHandle, UIADeadElementError, from_com_error, TextPatternRangeEndpoint
 from windows_mcp.tree.config import INTERACTIVE_CONTROL_TYPE_NAMES, DOCUMENT_CONTROL_TYPE_NAMES, INFORMATIVE_CONTROL_TYPE_NAMES, DEFAULT_ACTIONS, INTERACTIVE_ROLES, THREAD_MAX_RETRIES, STRUCTURAL_CONTROL_TYPE_NAMES
 from windows_mcp.tree.views import TreeElementNode, ScrollElementNode, TextElementNode, Center, BoundingBox, TreeState, SemanticNode, _prune_structural, _reverse_children_order
 from windows_mcp.tree.cache_utils import CacheRequestFactory, CachedControlHelper
@@ -570,6 +570,31 @@ class Tree:
                                                 word_elements.append((word,box))
                                 except Exception:
                                     pass
+
+                                # Selection state, reported only when there is a real (non-empty)
+                                # selection — a bare caret is the resting state of every focused
+                                # field and would be noise on every node.
+                                if not is_password:
+                                    try:
+                                        text_pattern = node.GetPattern(PatternId.TextPattern)
+                                        if text_pattern is not None:
+                                            selection = text_pattern.GetSelection()
+                                            if selection:
+                                                selected_range = selection[0]
+                                                selected_text = selected_range.GetText()
+                                                if selected_text:
+                                                    metadata['selected_text'] = selected_text
+                                                    document_range = text_pattern.DocumentRange
+                                                    starts_at_doc_start = selected_range.CompareEndpoints(
+                                                        TextPatternRangeEndpoint.Start, document_range, TextPatternRangeEndpoint.Start
+                                                    ) == 0
+                                                    ends_at_doc_end = selected_range.CompareEndpoints(
+                                                        TextPatternRangeEndpoint.End, document_range, TextPatternRangeEndpoint.End
+                                                    ) == 0
+                                                    if starts_at_doc_start and ends_at_doc_end:
+                                                        metadata['all_selected'] = True
+                                    except Exception:
+                                        pass
 
                             if isinstance(node,ComboBoxControl):
                                 try:
