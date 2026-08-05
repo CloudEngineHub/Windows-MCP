@@ -105,6 +105,12 @@ def _prepare_env() -> dict[str, str]:
     """
     env = os.environ.copy()
 
+    # PYTHONHOME is set by uv to pin its own managed interpreter for this
+    # server process. Leaking it into a spawned shell makes any Python found
+    # on PATH there resolve its standard library against the server's
+    # interpreter instead of its own, breaking unrelated installs (#350).
+    env.pop("PYTHONHOME", None)
+
     try:
         machine_vars, machine_path, machine_pathext = _read_reg_env(
             winreg.HKEY_LOCAL_MACHINE,
