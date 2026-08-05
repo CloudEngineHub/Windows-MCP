@@ -25,7 +25,9 @@
         "--directory",
         "${__dirname}",
         "run",
-        "windows-mcp",
+        "python",
+        "-m",
+        "windows_mcp",
         "serve"
       ],
       "env": {
