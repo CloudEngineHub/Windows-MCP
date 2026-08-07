@@ -27,8 +27,16 @@ def _node_meta_str(metadata: dict[str, Any]) -> str:
     if metadata.get("is_password"):
         parts.append("password")
     value = metadata.get("value")
-    if value and value != "(empty)":
+    # Compare against None rather than testing truthiness: a slider sitting at its
+    # minimum reports value 0.0, which is falsy, so a plain `if value` silently hides
+    # the value of every zeroed volume/brightness/zoom control.
+    if value is not None and value not in ("", "(empty)"):
         parts.append(f'value:"{value}"')
+    # Range bounds are meaningless for most controls but essential for a slider -- without
+    # them an agent knows the current value yet has no idea how far it can be moved.
+    minimum, maximum = metadata.get("min"), metadata.get("max")
+    if minimum is not None and maximum is not None:
+        parts.append(f"range:{minimum}-{maximum}")
     toggle = metadata.get("toggle_state")
     if toggle:
         parts.append(f"toggle:{toggle}")
