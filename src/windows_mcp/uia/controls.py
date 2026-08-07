@@ -49,6 +49,114 @@ ProcessTime()  # need to call it once if python version <= 3.6
 TreeNode = Any
 
 
+class _PropertyNotSupported:
+    """Sentinel type for a UI Automation property the provider does not implement.
+
+    Distinct from `None`: `None` is a legitimate value for several properties (an
+    unset `LabeledBy`, for instance), whereas this means the provider never
+    implemented the property at all.
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return "PROPERTY_NOT_SUPPORTED"
+
+
+PROPERTY_NOT_SUPPORTED = _PropertyNotSupported()
+
+# Properties whose value is an IUIAutomationElementArray behind a POINTER(IUnknown).
+ELEMENT_ARRAY_PROPERTY_IDS = frozenset(
+    [
+        PropertyId.AnnotationObjectsProperty,
+        PropertyId.ControllerForProperty,
+        PropertyId.DescribedByProperty,
+        PropertyId.DragGrabbedItemsProperty,
+        PropertyId.FlowsFromProperty,
+        PropertyId.FlowsToProperty,
+        PropertyId.LegacyIAccessibleSelectionProperty,
+        PropertyId.SelectionSelectionProperty,
+        PropertyId.SpreadsheetItemAnnotationObjectsProperty,
+        PropertyId.TableColumnHeadersProperty,
+        PropertyId.TableItemColumnHeaderItemsProperty,
+        PropertyId.TableItemRowHeaderItemsProperty,
+        PropertyId.TableRowHeadersProperty,
+    ]
+)
+
+# Properties whose value is a single IUIAutomationElement behind a POINTER(IUnknown).
+ELEMENT_PROPERTY_IDS = frozenset(
+    [
+        PropertyId.LabeledByProperty,
+        PropertyId.SelectionItemSelectionContainerProperty,
+    ]
+)
+
+_reservedNotSupportedAddress: Optional[int] = None
+
+
+def _get_reserved_not_supported_address() -> int:
+    """
+    Return int, the address of UI Automation's shared "not supported" sentinel.
+
+    `GetCurrentPropertyValueEx(pid, 1)` returns this exact singleton pointer for every
+    unimplemented property, so identity by address is the reliable test -- the object
+    itself is an opaque IUnknown with no comparable value. Cached on first use.
+    """
+    global _reservedNotSupportedAddress
+    if _reservedNotSupportedAddress is None:
+        try:
+            reserved = _AutomationClient.instance().IUIAutomation.ReservedNotSupportedValue
+            _reservedNotSupportedAddress = (
+                ctypes.cast(reserved, ctypes.c_void_p).value or 0
+            )
+        except (COMError, AttributeError, ValueError):
+            _reservedNotSupportedAddress = 0
+    return _reservedNotSupportedAddress
+
+
+def _is_reserved_value(value: Any, reservedAddress: int) -> bool:
+    """Return bool, True if `value` is the shared "not supported" sentinel pointer."""
+    if not reservedAddress or not isinstance(value, ctypes.POINTER(comtypes.IUnknown)):
+        return False
+    try:
+        return ctypes.cast(value, ctypes.c_void_p).value == reservedAddress
+    except (ctypes.ArgumentError, ValueError):
+        return False
+
+
+def _normalize_property_value(propertyId: int, value: Any, resolveElements: bool) -> Any:
+    """
+    Convert a raw UI Automation property value into a friendly Python value.
+
+    Handles the three raw shapes that are not already plain Python: the 4-double
+    bounding rectangle tuple, element arrays, and single element references.
+    """
+    if propertyId == PropertyId.BoundingRectangleProperty and isinstance(value, tuple):
+        if len(value) == 4:
+            left, top, width, height = value
+            return Rect(
+                left=int(left),
+                top=int(top),
+                right=int(left) + int(width),
+                bottom=int(top) + int(height),
+            )
+        return value
+    if resolveElements and propertyId in ELEMENT_ARRAY_PROPERTY_IDS:
+        return Control.CreateControlsFromRawElementArray(value)
+    if resolveElements and propertyId in ELEMENT_PROPERTY_IDS:
+        return Control.CreateControlFromRawElement(value)
+    return value
+
+
 class Control:
     ValidKeys = set(
         [
@@ -191,6 +299,61 @@ class Control:
             else:
                 pass
         return None
+
+    @staticmethod
+    def CreateControlsFromRawElementArray(rawValue: Any) -> List["Control"]:
+        """
+        Convert a raw element-array property value into a list of `Control`.
+
+        Element-array properties (`SelectionSelectionProperty`, `ControllerForProperty`,
+        `FlowsToProperty`, `TableRowHeadersProperty`, ...) come back from
+        `GetPropertyValue`/`GetCachedPropertyValue` as a bare `POINTER(IUnknown)` that
+        still needs a QueryInterface to `IUIAutomationElementArray`. Note the pointer is
+        non-NULL even when the array is empty, so truthiness of the raw value says
+        nothing about whether the property actually has entries.
+
+        rawValue: the raw property value, or None.
+        Return List[Control], empty if rawValue is None, not an element array, or empty.
+        """
+        if not rawValue:
+            return []
+        try:
+            elementArray = rawValue.QueryInterface(
+                _AutomationClient.instance().UIAutomationCore.IUIAutomationElementArray
+            )
+        except (COMError, ValueError, AttributeError):
+            return []
+        controls: List["Control"] = []
+        for i in range(elementArray.Length):
+            try:
+                control = Control.CreateControlFromElement(elementArray.GetElement(i))
+            except COMError:
+                continue
+            if control:
+                controls.append(control)
+        return controls
+
+    @staticmethod
+    def CreateControlFromRawElement(rawValue: Any) -> "Control" | None:
+        """
+        Convert a raw single-element property value (e.g. `LabeledByProperty`) into a
+        `Control`, QueryInterface-ing the `POINTER(IUnknown)` to `IUIAutomationElement`.
+
+        rawValue: the raw property value, or None.
+        Return `Control` or None if rawValue is None or is not an element.
+        """
+        if not rawValue:
+            return None
+        try:
+            element = rawValue.QueryInterface(
+                _AutomationClient.instance().UIAutomationCore.IUIAutomationElement
+            )
+        except (COMError, ValueError, AttributeError):
+            return None
+        try:
+            return Control.CreateControlFromElement(element)
+        except COMError:
+            return None
 
     @staticmethod
     def CreateControlFromControl(control: "Control") -> "Control" | None:
@@ -1155,6 +1318,75 @@ class Control:
         Refer https://docs.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-getcurrentpropertyvalueex
         """
         return self.Element.GetCurrentPropertyValueEx(propertyId, ignoreDefaultValue)
+
+    def GetAllPropertyValues(
+        self,
+        cached: bool = False,
+        includeUnsupported: bool = False,
+        resolveElements: bool = True,
+        propertyIds: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Read every UI Automation property this element exposes, keyed by property name.
+
+        Unsupported properties are the norm, not the exception -- a typical element
+        supports ~30 of the ~175 defined properties. They are resolved with
+        `GetCurrentPropertyValueEx(propertyId, ignoreDefaultValue=1)` so that a provider
+        that does not implement a property yields the reserved "not supported" sentinel
+        instead of a *type default* that is indistinguishable from a real value. Using
+        plain `GetCurrentPropertyValue` here would be actively misleading: a plain Pane
+        reports `ToggleToggleState=2` and `GridItemRowSpan=1` despite supporting neither
+        pattern.
+
+        cached: bool, read from the element's cache instead of live. Only properties
+            added to the `CacheRequest` used to build this element are available; the
+            rest are reported as not supported. Cached reads cannot use the `Ex` variant,
+            so defaults cannot be filtered out -- prefer live reads when you need to know
+            what is genuinely supported.
+        includeUnsupported: bool, if True, unsupported properties are included with the
+            value `PROPERTY_NOT_SUPPORTED`. If False (default) they are omitted.
+        resolveElements: bool, if True, element-valued and element-array-valued
+            properties are converted to `Control` / List[`Control`]. If False they are
+            left as the raw `POINTER(IUnknown)`.
+        propertyIds: optional list of `PropertyId` values to restrict the query to.
+            Defaults to every property in `PropertyIdNames`.
+
+        Return Dict[str, Any], mapping property name (e.g. 'NameProperty') to value.
+
+        NOTE: each property is a separate cross-process COM call, so a full live read is
+        ~175 round-trips (tens of milliseconds). This is a diagnostic/introspection API
+        -- do not call it per node during a tree traversal; add the handful of properties
+        you need to a `CacheRequest` instead.
+        """
+        ids = propertyIds if propertyIds is not None else list(PropertyIdNames.keys())
+        notSupported = _get_reserved_not_supported_address()
+        values: Dict[str, Any] = {}
+        for propertyId in ids:
+            name = PropertyIdNames.get(propertyId, str(propertyId))
+            try:
+                if cached:
+                    value = self.Element.GetCachedPropertyValue(propertyId)
+                else:
+                    value = self.Element.GetCurrentPropertyValueEx(propertyId, 1)
+            except (COMError, ValueError):
+                if includeUnsupported:
+                    values[name] = PROPERTY_NOT_SUPPORTED
+                continue
+
+            if _is_reserved_value(value, notSupported):
+                if includeUnsupported:
+                    values[name] = PROPERTY_NOT_SUPPORTED
+                continue
+
+            values[name] = _normalize_property_value(propertyId, value, resolveElements)
+        return values
+
+    def GetSupportedPropertyNames(self) -> List[str]:
+        """
+        Return List[str], the names of the UI Automation properties this element actually
+        implements, sorted alphabetically. Thin wrapper over `GetAllPropertyValues`.
+        """
+        return sorted(self.GetAllPropertyValues().keys())
 
     def GetRuntimeId(self) -> List[int]:
         """
