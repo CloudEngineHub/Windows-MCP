@@ -503,6 +503,54 @@ class Control:
         return self.Element.CachedHasKeyboardFocus
 
     @property
+    def CachedHeadingLevel(self) -> HeadingLevel:
+        """
+        Get the cached heading level, as a `HeadingLevel`.
+
+        Unlike the neighbouring accessors this cannot read `Element.CachedHeadingLevel`:
+        that member only exists on `IUIAutomationElement6` and later, while `Element` is a
+        plain `IUIAutomationElement`. Going through `GetCachedPropertyValue` keeps it
+        working regardless of the interface version comtypes generated.
+
+        Requires `PropertyId.HeadingLevelProperty` in the `CacheRequest`.
+        Return `HeadingLevel`, `HeadingLevel.None_` when the element is not a heading.
+        """
+        value = self.GetCachedPropertyValue(PropertyId.HeadingLevelProperty)
+        try:
+            return HeadingLevel(value)
+        except ValueError:
+            return HeadingLevel.None_
+
+    @property
+    def CachedIsDialog(self) -> bool:
+        """
+        Get whether the element is a dialog, from the cache.
+
+        Read via `GetCachedPropertyValue` because `Element.CachedIsDialog` only exists on
+        `IUIAutomationElement9` and later.
+
+        Requires `PropertyId.IsDialogProperty` in the `CacheRequest`.
+        """
+        return bool(self.GetCachedPropertyValue(PropertyId.IsDialogProperty))
+
+    @property
+    def CachedLandmarkType(self) -> LandmarkType:
+        """
+        Get the cached landmark type, as a `LandmarkType`.
+
+        Read via `GetCachedPropertyValue` because `Element.CachedLandmarkType` only exists
+        on `IUIAutomationElement6` and later.
+
+        Requires `PropertyId.LandmarkTypeProperty` in the `CacheRequest`.
+        Return `LandmarkType`, `LandmarkType.None_` when the element is not a landmark.
+        """
+        value = self.GetCachedPropertyValue(PropertyId.LandmarkTypeProperty)
+        try:
+            return LandmarkType(value)
+        except ValueError:
+            return LandmarkType.None_
+
+    @property
     def CachedHelpText(self) -> str:
         """Get the cached help text."""
         return self.Element.CachedHelpText

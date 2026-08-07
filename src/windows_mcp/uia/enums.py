@@ -842,6 +842,28 @@ class HeadingLevel(IntEnum):
     Level9 = 80059
 
 
+class LandmarkType(IntEnum):
+    """
+    LandmarkType from IUIAutomation, the value of `PropertyId.LandmarkTypeProperty`.
+
+    Marks a region's semantic role in a page or window (ARIA landmarks, and the WinUI /
+    Win32 equivalents). Like `HeadingLevel` the identifiers start at 80000, but unlike it
+    the "not a landmark" case is reported as plain `0`, not as a member of the 80000
+    range -- hence `None_ = 0`.
+
+    Observed in the wild on Paint, File Explorer, Snipping Tool, Calculator and Electron
+    apps; `Form` is the only member not seen during that sweep.
+    Refer https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-landmarktype-ids
+    """
+
+    None_ = 0
+    Custom = 80000
+    Form = 80001
+    Main = 80002
+    Navigation = 80003
+    Search = 80004
+
+
 class ExpandCollapseState(IntEnum):
     """
     ExpandCollapseState from IUIAutomation.
