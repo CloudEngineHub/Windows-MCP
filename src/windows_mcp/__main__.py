@@ -236,7 +236,6 @@ def _build_mcp() -> FastMCP:
         try:
             if watchdog:
                 watchdog.start()
-            await asyncio.sleep(1)  # Simulate startup latency
             logger.debug("Server started, entering main loop")
             yield
         finally:
