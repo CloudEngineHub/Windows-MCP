@@ -8,9 +8,8 @@ from windows_mcp.vdm.core import (
     get_current_desktop,
     is_window_on_current_desktop,
 )
-from windows_mcp.desktop.views import DesktopState, Window, Browser, Status, Size, Display
-from windows_mcp.tree.views import BoundingBox, TreeElementNode, TreeState, SemanticNode
-from concurrent.futures import ThreadPoolExecutor
+from windows_mcp.desktop.views import DesktopState, Window, Browser, Status, Size
+from windows_mcp.tree.views import BoundingBox, TreeElementNode, TreeState
 from PIL import ImageFont, ImageDraw, Image
 from windows_mcp.tree.service import Tree
 from windows_mcp.desktop import screenshot as screenshot_capture
@@ -1225,9 +1224,10 @@ class Desktop:
                 label_y = bottom + 2
             draw_label(label_text, label_x, label_y, color)
 
-        # Draw annotations in parallel
-        with ThreadPoolExecutor() as executor:
-            executor.map(draw_annotation, range(len(nodes)), nodes)
+        # Draw annotations sequentially: PIL ImageDraw is not thread-safe and
+        # drawing is GIL-bound, so parallel execution adds risk without speed.
+        for i, node in enumerate(nodes):
+            draw_annotation(i, node)
 
         # Draw cursor highlight if pos provided
         if cursor_pos:
