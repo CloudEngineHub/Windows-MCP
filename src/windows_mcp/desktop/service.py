@@ -14,7 +14,7 @@ from PIL import ImageFont, ImageDraw, Image
 from windows_mcp.tree.service import Tree
 from windows_mcp.desktop import screenshot as screenshot_capture
 from windows_mcp.desktop import flash_overlay
-from windows_mcp.infrastructure import validate_url
+from windows_mcp.infrastructure import safe_get
 from urllib.parse import urljoin
 from locale import getpreferredencoding
 from typing import Literal
@@ -899,14 +899,10 @@ class Desktop:
         current_url = url
         try:
             for _ in range(5):
-                validate_url(current_url)
-                response = requests.get(current_url, timeout=10, allow_redirects=False)
+                response = safe_get(current_url, timeout=10)
                 if not response.is_redirect:
                     break
-                location = response.headers.get("Location")
-                if not location:
-                    raise ValueError(f"Redirect from {current_url} has no Location header")
-                current_url = urljoin(current_url, location)
+                current_url = urljoin(current_url, response.headers["Location"])
             else:
                 raise ValueError("Too many redirects while fetching URL")
             response.raise_for_status()
