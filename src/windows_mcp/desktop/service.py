@@ -1,4 +1,5 @@
 from windows_mcp.desktop.utils import (
+    as_bool,
     resolve_known_folder_guid_path,
 )
 from windows_mcp.powershell.utils import ps_quote
@@ -693,11 +694,35 @@ class Desktop:
             results.append((element_node.center.x, element_node.center.y))
         return results
 
+    @staticmethod
+    def _validate_screen_point(x: int, y: int) -> None:
+        """Reject a point no window can receive input at.
+
+        SetCursorPos and absolute mouse events both clamp an out-of-range
+        point to the nearest reachable pixel, so input aimed past the edge of
+        the desktop lands somewhere else entirely while the tool still reports
+        success. Bounds come from the virtual desktop rather than the primary
+        monitor, so a secondary monitor left of or above the primary one keeps
+        its legitimate negative coordinates.
+
+        Raises:
+            ValueError: If (x, y) falls outside the virtual desktop.
+        """
+        left, top, width, height = uia.GetVirtualScreenRect()
+        right = left + width - 1
+        bottom = top + height - 1
+        if not (left <= x <= right and top <= y <= bottom):
+            raise ValueError(
+                f"Coordinates ({x},{y}) are outside the desktop bounds "
+                f"x={left}..{right}, y={top}..{bottom}"
+            )
+
     def click(self, loc: tuple[int, int] | list[int], button: str = "left", clicks: int = 1):
         if isinstance(loc, list):
             x, y = loc[0], loc[1]
         else:
             x, y = loc
+        self._validate_screen_point(x, y)
         if clicks == 0:
             uia.SetCursorPos(x, y)
             return
@@ -734,13 +759,16 @@ class Desktop:
         clear: bool | str = False,
         press_enter: bool | str = False,
     ):
+        clear = as_bool(clear, "clear")
+        press_enter = as_bool(press_enter, "press_enter")
         x, y = loc
+        self._validate_screen_point(x, y)
         uia.Click(x, y)
         if caret_position == "start":
             uia.SendKeys("{Home}", waitTime=0.05)
         elif caret_position == "end":
             uia.SendKeys("{End}", waitTime=0.05)
-        if clear is True or (isinstance(clear, str) and clear.lower() == "true"):
+        if clear:
             sleep(0.5)
             uia.SendKeys("{Ctrl}a", waitTime=0.05)
             uia.SendKeys("{Back}", waitTime=0.05)
@@ -754,7 +782,7 @@ class Desktop:
             # Bump interval from 0.02 → 0.04. Keeps short-text speed acceptable
             # while reducing key-loss on slower systems.
             uia.SendKeys(escaped_text, interval=0.04, waitTime=0.05)
-        if press_enter is True or (isinstance(press_enter, str) and press_enter.lower() == "true"):
+        if press_enter:
             uia.SendKeys("{Enter}", waitTime=0.05)
 
     def _paste_text(self, text: str):

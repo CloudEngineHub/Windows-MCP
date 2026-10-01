@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
+from windows_mcp.desktop.utils import as_bool as _as_bool
 from windows_mcp.infrastructure import with_analytics
 from fastmcp import Context
 
@@ -29,18 +30,6 @@ def _resolve_label(desktop: Any, label: int) -> list[int]:
         return list(desktop.get_coordinates_from_label(label))
     except Exception as e:
         raise ValueError(f"Failed to find element with label {label}: {e}")
-
-
-def _as_bool(value: bool | str, name: str) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized == "true":
-            return True
-        if normalized == "false":
-            return False
-    raise ValueError(f"{name} must be true or false")
 
 
 def _validate_finite_number(value: object, name: str) -> None:
@@ -268,7 +257,7 @@ def register(
 
     @mcp.tool(
         name="Type",
-        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear=True to clear existing text first, False to append. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label.",
+        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear=True to clear existing text first, False to append. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label. clear and press_enter accept only true or false. An empty text types nothing, so combine it with clear=True to just empty a field.",
         annotations=ToolAnnotations(
             title="Type",
             readOnlyHint=False,
@@ -289,6 +278,8 @@ def register(
     ) -> str:
         desktop = get_desktop()
         loc = _as_loc(loc)
+        clear = _as_bool(clear, "clear")
+        press_enter = _as_bool(press_enter, "press_enter")
         if loc is None and label is None:
             raise ValueError("Either loc or label must be provided.")
         if label is not None:
