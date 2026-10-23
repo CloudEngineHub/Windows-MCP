@@ -144,14 +144,19 @@ def move_path(source: str, destination: str, overwrite: bool = False) -> str:
 
 
 def delete_path(path: str, recursive: bool = False) -> str:
-    """Delete a file or directory."""
-    target = Path(path).resolve()
-
-    if not target.exists():
-        return f'Error: Path not found: {target}'
+    """Delete a file or directory, removing links without following their targets."""
+    target = Path(path).absolute()
 
     try:
-        if target.is_file() or target.is_symlink():
+        if target.is_symlink():
+            target.unlink()
+            return f'Deleted file: {target}'
+        if target.is_junction():
+            target.rmdir()
+            return f'Deleted directory: {target}'
+        if not target.exists():
+            return f'Error: Path not found: {target}'
+        if target.is_file():
             target.unlink()
             return f'Deleted file: {target}'
         elif target.is_dir():
